@@ -1,6 +1,7 @@
 package models
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,26 +26,100 @@ type Card struct {
 }
 
 type Transaction struct {
-	ID                   uuid.UUID `json:"id"`
-	UserID               uuid.UUID `json:"user_id"`
-	CardID               uuid.UUID `json:"card_id"`
-	Amount               float64   `json:"amount"`
-	Currency             string    `json:"currency"`
-	Status               string    `json:"status"`
-	GatewayTransactionID string    `json:"gateway_transaction_id"`
-	Type                 string    `json:"type"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                   uuid.UUID      `json:"id"`
+	UserID               uuid.UUID      `json:"user_id"`
+	CardID               uuid.UUID      `json:"card_id"`
+	SubscriptionID       uuid.NullUUID  `json:"subscription_id,omitempty"`
+	BillingAttemptID     uuid.NullUUID  `json:"billing_attempt_id,omitempty"`
+	InvoiceID            sql.NullString `json:"invoice_id,omitempty"`
+	Amount               float64        `json:"amount"`
+	Currency             string         `json:"currency"`
+	Status               string         `json:"status"`
+	GatewayTransactionID string         `json:"gateway_transaction_id"`
+	Type                 string         `json:"type"` // "manual", "recurring", "authorization", "capture", "void", "refund"
+	CreatedAt            time.Time      `json:"created_at"`
 }
 
+type Plan struct {
+	ID              uuid.UUID `json:"id"`
+	Name            string    `json:"name"`
+	Amount          float64   `json:"amount"`
+	Currency        string    `json:"currency"`
+	Interval        string    `json:"interval"` // "day", "week", "month", "year"
+	TrialPeriodDays int       `json:"trial_period_days"`
+	Description     string    `json:"description"`
+	IsActive        bool      `json:"is_active"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type SubscriptionStatus string
+
+const (
+	SubscriptionStatusActive            SubscriptionStatus = "active"
+	SubscriptionStatusPastDue           SubscriptionStatus = "past_due"
+	SubscriptionStatusCanceled          SubscriptionStatus = "canceled"
+	SubscriptionStatusIncomplete        SubscriptionStatus = "incomplete"
+	SubscriptionStatusIncompleteExpired SubscriptionStatus = "incomplete_expired"
+	SubscriptionStatusTrialing          SubscriptionStatus = "trialing"
+	SubscriptionStatusUnpaid            SubscriptionStatus = "unpaid"
+)
+
+// SubscriptionInterval type for type safety
+type SubscriptionInterval string
+
+const (
+	IntervalDay   SubscriptionInterval = "day"
+	IntervalWeek  SubscriptionInterval = "week"
+	IntervalMonth SubscriptionInterval = "month"
+	IntervalYear  SubscriptionInterval = "year"
+)
+
 type Subscription struct {
-	ID            uuid.UUID `json:"id"`
-	UserID        uuid.UUID `json:"user_id"`
-	CardID        uuid.UUID `json:"card_id"`
-	PlanName      string    `json:"plan_name"`
-	Amount        float64   `json:"amount"`
-	Currency      string    `json:"currency"`
-	Status        string    `json:"status"`
-	Interval      string    `json:"interval"`
-	NextBillingAt time.Time `json:"next_billing_at"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID                 uuid.UUID            `json:"id"`
+	UserID             uuid.UUID            `json:"user_id"`
+	PlanID             uuid.NullUUID        `json:"plan_id,omitempty"`
+	CardID             uuid.NullUUID        `json:"card_id,omitempty"`
+	PlanName           string               `json:"plan_name"`
+	Amount             float64              `json:"amount"`
+	Currency           string               `json:"currency"`
+	Status             SubscriptionStatus   `json:"status"`
+	Interval           SubscriptionInterval `json:"interval"`
+	CurrentPeriodStart sql.NullTime         `json:"current_period_start,omitempty"`
+	CurrentPeriodEnd   sql.NullTime         `json:"current_period_end,omitempty"`
+	TrialStart         sql.NullTime         `json:"trial_start,omitempty"`
+	TrialEnd           sql.NullTime         `json:"trial_end,omitempty"`
+	CancelAtPeriodEnd  bool                 `json:"cancel_at_period_end"`
+	CanceledAt         sql.NullTime         `json:"canceled_at,omitempty"`
+	Metadata           map[string]string    `json:"metadata,omitempty"`
+	BillingCycleAnchor sql.NullTime         `json:"billing_cycle_anchor,omitempty"`
+	NextBillingAt      time.Time            `json:"next_billing_at"`
+	CreatedAt          time.Time            `json:"created_at"`
+}
+
+// BillingAttemptStatus type for type safety
+type BillingAttemptStatus string
+
+const (
+	BillingAttemptStatusPending        BillingAttemptStatus = "pending"
+	BillingAttemptStatusProcessing     BillingAttemptStatus = "processing"
+	BillingAttemptStatusSucceeded      BillingAttemptStatus = "succeeded"
+	BillingAttemptStatusFailed         BillingAttemptStatus = "failed"
+	BillingAttemptStatusRequiresAction BillingAttemptStatus = "requires_action"
+)
+
+// BillingAttempt model (NEW)
+type BillingAttempt struct {
+	ID                   uuid.UUID            `json:"id"`
+	SubscriptionID       uuid.UUID            `json:"subscription_id"`
+	Amount               float64              `json:"amount"`
+	Currency             string               `json:"currency"`
+	Status               BillingAttemptStatus `json:"status"`
+	GatewayTransactionID sql.NullString       `json:"gateway_transaction_id,omitempty"`
+	ErrorCode            sql.NullString       `json:"error_code,omitempty"`
+	ErrorMessage         sql.NullString       `json:"error_message,omitempty"`
+	AttemptNumber        int                  `json:"attempt_number"`
+	ScheduledAt          time.Time            `json:"scheduled_at"`
+	ProcessedAt          sql.NullTime         `json:"processed_at,omitempty"`
+	CreatedAt            time.Time            `json:"created_at"`
 }
