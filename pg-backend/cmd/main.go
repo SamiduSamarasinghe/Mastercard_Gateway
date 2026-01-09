@@ -40,13 +40,6 @@ func main() {
 	}
 	log.Println(result)
 
-	// Run database migrations
-	log.Println("Running database migrations...")
-	if err := database.RunMigrations(database.DB); err != nil {
-		log.Fatal("Failed to run migrations:", err)
-	}
-	log.Println("Migrations completed successfully")
-
 	// Initialize repositories
 	userRepo := repositories.NewUserRepository()
 	cardRepo := repositories.NewCardRepository()
