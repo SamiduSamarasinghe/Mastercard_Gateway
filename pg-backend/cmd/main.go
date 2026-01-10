@@ -45,13 +45,42 @@ func main() {
 	cardRepo := repositories.NewCardRepository()
 	transactionRepo := repositories.NewTransactionRepository()
 
+	// NEW: Initialize subscription repositories
+	planRepo := repositories.NewPlanRepository()
+	subscriptionRepo := repositories.NewSubscriptionRepository()
+	billingRepo := repositories.NewBillingRepository()
+
 	// Initialize services
 	mastercardService := services.NewMastercardService(cfg)
+
+	// NEW: Initialize subscription services
+	planService := services.NewPlanService(planRepo)
+	billingService := services.NewBillingService(
+		transactionRepo,
+		billingRepo,
+		cardRepo,
+		subscriptionRepo,
+		userRepo,
+		mastercardService,
+	)
+	subscriptionService := services.NewSubscriptionService(
+		subscriptionRepo,
+		planRepo,
+		cardRepo,
+		billingRepo,
+		transactionRepo,
+		mastercardService,
+	)
 
 	// Initialize handlers
 	cardHandler := handlers.NewCardHandler(mastercardService, userRepo, cardRepo)
 	paymentHandler := handlers.NewPaymentHandler(mastercardService, userRepo, cardRepo, transactionRepo)
 	authorizationHandler := handlers.NewAuthorizationHandler(mastercardService, userRepo, cardRepo, transactionRepo)
+
+	// NEW: Initialize subscription handlers
+	planHandler := handlers.NewPlanHandler(planService)
+	subscriptionHandler := handlers.NewSubscriptionHandler(subscriptionService)
+	billingHandler := handlers.NewBillingHandler(billingService)
 
 	// Setup Gin router
 	router := gin.Default()
@@ -80,6 +109,27 @@ func main() {
 		// Transaction endpoints
 		api.GET("/users/:user_id/transactions", paymentHandler.GetTransactions)
 		api.GET("/transactions/:transaction_id", paymentHandler.GetTransactionByID)
+
+		// NEW: Plan endpoints
+		api.GET("/plans", planHandler.GetPlans)
+		api.GET("/plans/:id", planHandler.GetPlan)
+		api.POST("/plans", planHandler.CreatePlan)
+		api.PUT("/plans/:id", planHandler.UpdatePlan)
+		api.DELETE("/plans/:id", planHandler.DeletePlan)
+		api.GET("/plans/currency/:currency", planHandler.GetPlansByCurrency)
+
+		// NEW: Subscription endpoints
+		api.POST("/subscriptions", subscriptionHandler.CreateSubscription)
+		api.GET("/subscriptions/:id", subscriptionHandler.GetSubscription)
+		api.GET("/users/:user_id/subscriptions", subscriptionHandler.GetUserSubscriptions)
+		api.POST("/subscriptions/:id/cancel", subscriptionHandler.CancelSubscription)
+		api.PUT("/subscriptions/:id/card", subscriptionHandler.UpdateSubscriptionCard)
+
+		// NEW: Billing endpoints
+		api.POST("/billing/manual", billingHandler.CreateManualPayment)
+		api.GET("/users/:user_id/billing-history", billingHandler.GetBillingHistory)
+		api.GET("/subscriptions/:id/billing-history", billingHandler.GetSubscriptionBillingHistory)
+		api.POST("/billing/process", billingHandler.ProcessBillingAttempts)
 	}
 
 	// Start server
