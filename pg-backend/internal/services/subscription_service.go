@@ -279,8 +279,9 @@ func (s *subscriptionService) processSingleSubscription(ctx context.Context, sub
 	return s.subscriptionRepo.UpdateSubscription(ctx, subscription)
 }
 
+// internal/services/subscription_service.go (Update existing method)
 func (s *subscriptionService) RetryFailedBilling(ctx context.Context, maxAttempts int) (int, error) {
-	// Get failed billing attempts older than 24 hours for retry
+	// Get failed billing attempts older than appropriate times based on attempt number
 	olderThan := time.Now().Add(-24 * time.Hour)
 	attempts, err := s.billingRepo.GetFailedBillingAttemptsForRetry(ctx, maxAttempts, olderThan)
 	if err != nil {
@@ -289,26 +290,53 @@ func (s *subscriptionService) RetryFailedBilling(ctx context.Context, maxAttempt
 
 	retryCount := 0
 	for _, attempt := range attempts {
-		// Get subscription (we need to verify it exists)
-		_, err := s.subscriptionRepo.GetSubscriptionByID(ctx, attempt.SubscriptionID)
+		// Get subscription
+		subscription, err := s.subscriptionRepo.GetSubscriptionByID(ctx, attempt.SubscriptionID)
 		if err != nil {
 			fmt.Printf("Subscription not found for attempt %s: %v\n", attempt.ID, err)
 			continue
 		}
 
-		// Create new billing attempt with incremented attempt number
+		// Check if subscription is still active
+		if subscription.Status != models.SubscriptionStatusActive &&
+			subscription.Status != models.SubscriptionStatusPastDue {
+			continue // Don't retry for canceled/inactive subscriptions
+		}
+
+		// Calculate exponential backoff: immediate, 3 days, 7 days
+		var retryDelay time.Duration
+		switch attempt.AttemptNumber {
+		case 1:
+			retryDelay = 0 // Immediate retry
+		case 2:
+			retryDelay = 72 * time.Hour // 3 days
+		case 3:
+			retryDelay = 168 * time.Hour // 7 days
+		default:
+			continue // No more retries
+		}
+
+		// Create new billing attempt
 		newAttempt := &models.BillingAttempt{
 			SubscriptionID: attempt.SubscriptionID,
 			Amount:         attempt.Amount,
 			Currency:       attempt.Currency,
 			Status:         models.BillingAttemptStatusPending,
 			AttemptNumber:  attempt.AttemptNumber + 1,
-			ScheduledAt:    time.Now().Add(time.Duration(attempt.AttemptNumber) * 24 * time.Hour), // Exponential backoff
+			ScheduledAt:    time.Now().Add(retryDelay),
 		}
 
 		if err := s.billingRepo.CreateBillingAttempt(ctx, newAttempt); err != nil {
 			fmt.Printf("Failed to create retry attempt: %v\n", err)
 			continue
+		}
+
+		// Update subscription status to past_due if first failure
+		if attempt.AttemptNumber == 1 && subscription.Status == models.SubscriptionStatusActive {
+			subscription.Status = models.SubscriptionStatusPastDue
+			if err := s.subscriptionRepo.UpdateSubscription(ctx, subscription); err != nil {
+				fmt.Printf("Failed to update subscription status: %v\n", err)
+			}
 		}
 
 		retryCount++
