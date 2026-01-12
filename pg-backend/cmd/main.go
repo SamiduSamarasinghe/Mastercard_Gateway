@@ -9,6 +9,7 @@ import (
 	"pg-backend/internal/handlers"
 	"pg-backend/internal/repositories"
 	"pg-backend/internal/services"
+	"pg-backend/internal/worker"
 
 	"github.com/joho/godotenv"
 
@@ -82,6 +83,32 @@ func main() {
 	subscriptionHandler := handlers.NewSubscriptionHandler(subscriptionService)
 	billingHandler := handlers.NewBillingHandler(billingService)
 
+	// NEW: Initialize worker
+	workerManager := worker.NewWorkerManager()
+
+	// Create billing worker
+	billingWorker := worker.NewBillingWorker(
+		subscriptionService,
+		billingService,
+		cfg,
+	)
+
+	// Register worker
+	workerManager.RegisterWorker(billingWorker)
+
+	// NEW: Initialize worker handler
+	workerHandler := handlers.NewWorkerHandler(workerManager)
+
+	// Start worker in background
+	go func() {
+		if err := workerManager.StartAll(); err != nil {
+			log.Printf("Failed to start workers: %v", err)
+		}
+	}()
+
+	// Ensure worker stops gracefully on shutdown
+	defer workerManager.StopAll()
+
 	// Setup Gin router
 	router := gin.Default()
 
@@ -130,6 +157,10 @@ func main() {
 		api.GET("/users/:user_id/billing-history", billingHandler.GetBillingHistory)
 		api.GET("/subscriptions/:id/billing-history", billingHandler.GetSubscriptionBillingHistory)
 		api.POST("/billing/process", billingHandler.ProcessBillingAttempts)
+
+		// NEW: Add worker endpoints
+		api.GET("/worker/status", workerHandler.GetWorkerStatus)
+		api.POST("/worker/restart", workerHandler.RestartWorkers)
 	}
 
 	// Start server
