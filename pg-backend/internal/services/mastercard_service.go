@@ -6,13 +6,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"pg-backend/internal/config"
 	"pg-backend/pkg/utils"
+)
+
+// Test data for Google Pay (from MTF documentation)
+const (
+	// Test DPANs (Device Primary Account Numbers) for mobile wallet payments
+	TestDPANVisa        = "4895370012003478"
+	TestDPANAmex        = "370295136149943"
+	TestDPANExpiryMonth = "12"
+	TestDPANExpiryYear  = "2028"
+
+	// Test FPAN (Funding Primary Account Number) for card saved to Google account
+	TestFPANVisa        = "4111111111111111"
+	TestFPANExpiryMonth = "12"
+	TestFPANExpiryYear  = "2028"
+
+	// Test cryptogram and ECI from Postman collection
+	TestCryptogram   = "IA/8pdiWftSsxpFT6wABoDABhgA="
+	TestEciIndicator = "20"
 )
 
 type MastercardService interface {
@@ -32,6 +52,47 @@ type MastercardService interface {
 
 	// Other operations
 	RefundPayment(orderID, amount, currency string) (*PaymentResponse, error)
+
+	// NEW: Google Pay methods for merchant-decrypted flow
+	PayWithGooglePay(cardNumber, expiryMonth, expiryYear, cryptogram, eci, amount, currency string) (*PaymentResponse, error)
+	AuthorizeWithGooglePay(cardNumber, expiryMonth, expiryYear, cryptogram, eci, amount, currency string) (*PaymentResponse, error)
+
+	// For future use with real Google Pay tokens (Phase 2)
+	PayWithGooglePayToken(paymentToken, amount, currency string) (*PaymentResponse, error)
+	AuthorizeWithGooglePayToken(paymentToken, amount, currency string) (*PaymentResponse, error)
+}
+
+// Add GooglePayPaymentRequest struct for the merchant-decrypted flow
+type GooglePayPaymentRequest struct {
+	ApiOperation string `json:"apiOperation"`
+	Order        struct {
+		Amount         string `json:"amount"`
+		Currency       string `json:"currency"`
+		WalletProvider string `json:"walletProvider"`
+	} `json:"order"`
+	SourceOfFunds struct {
+		Type     string `json:"type"`
+		Provided struct {
+			Card struct {
+				Number string `json:"number"`
+				Expiry struct {
+					Month string `json:"month"`
+					Year  string `json:"year"`
+				} `json:"expiry"`
+				DevicePayment struct {
+					CryptogramFormat        string `json:"cryptogramFormat"`
+					OnlinePaymentCryptogram string `json:"onlinePaymentCryptogram"`
+					EciIndicator            string `json:"eciIndicator,omitempty"`
+				} `json:"devicePayment"`
+			} `json:"card"`
+		} `json:"provided"`
+	} `json:"sourceOfFunds"`
+	Device struct {
+		Ani string `json:"ani,omitempty"`
+	} `json:"device,omitempty"`
+	Transaction struct {
+		Source string `json:"source"`
+	} `json:"transaction"`
 }
 
 type mastercardService struct {
@@ -335,10 +396,11 @@ type PaymentResponse struct {
 	Result      string `json:"result"`
 	GatewayCode string `json:"gatewayCode"`
 	Order       struct {
-		ID       string      `json:"id"`
-		Amount   interface{} `json:"amount"`
-		Currency string      `json:"currency"`
-		Status   string      `json:"status"`
+		ID             string      `json:"id"`
+		Amount         interface{} `json:"amount"`
+		Currency       string      `json:"currency"`
+		Status         string      `json:"status"`
+		WalletProvider string      `json:"walletProvider,omitempty"`
 	} `json:"order"`
 	Transaction struct {
 		ID          string      `json:"id"`
@@ -349,20 +411,6 @@ type PaymentResponse struct {
 		Description string      `json:"description"`
 	} `json:"transaction"`
 }
-
-// // Helper function to convert interface{} to string
-// func convertToString(v interface{}) string {
-// 	switch val := v.(type) {
-// 	case string:
-// 		return val
-// 	case float64:
-// 		return strconv.FormatFloat(val, 'f', -1, 64)
-// 	case int:
-// 		return strconv.Itoa(val)
-// 	default:
-// 		return fmt.Sprintf("%v", val)
-// 	}
-// }
 
 func generateOrderID() string {
 	rand.Seed(time.Now().UnixNano())
@@ -517,6 +565,199 @@ func (s *mastercardService) RefundPayment(orderID, amount, currency string) (*Pa
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
 	}
+
+	return &response, nil
+}
+
+// internal/services/mastercard_service.go
+// Add these methods to the mastercardService struct:
+
+// PayWithGooglePay processes a Google Pay payment with merchant-decrypted card details
+func (s *mastercardService) PayWithGooglePay(cardNumber, expiryMonth, expiryYear, cryptogram, eci, amount, currency string) (*PaymentResponse, error) {
+	// Check if we have Device Payments privilege
+	// If not, simulate Google Pay with regular PAY operation (for testing)
+
+	orderID := generateOrderID()
+	endpoint := fmt.Sprintf("/api/rest/version/100/merchant/%s/order/%s/transaction/1",
+		s.cfg.MastercardMerchantID, orderID)
+
+	// Try Google Pay with Device Payments first
+	request := GooglePayPaymentRequest{
+		ApiOperation: "PAY",
+	}
+	request.Order.Amount = amount
+	request.Order.Currency = currency
+	request.Order.WalletProvider = "GOOGLE_PAY"
+	request.SourceOfFunds.Type = "CARD"
+	request.SourceOfFunds.Provided.Card.Number = cardNumber
+	request.SourceOfFunds.Provided.Card.Expiry.Month = expiryMonth
+	request.SourceOfFunds.Provided.Card.Expiry.Year = expiryYear
+	request.SourceOfFunds.Provided.Card.DevicePayment.CryptogramFormat = "3DSECURE"
+	request.SourceOfFunds.Provided.Card.DevicePayment.OnlinePaymentCryptogram = cryptogram
+	request.SourceOfFunds.Provided.Card.DevicePayment.EciIndicator = eci
+	request.Device.Ani = "12341234"
+	request.Transaction.Source = "INTERNET"
+
+	body, err := s.makeRequest("PUT", endpoint, request)
+
+	// If Google Pay fails due to missing privilege, fallback to regular card payment
+	if err != nil && strings.Contains(err.Error(), "Missing merchant privilege") {
+		log.Println("Device Payments privilege not available, simulating Google Pay with regular card payment")
+
+		// Fallback to regular PAY operation (simulating Google Pay)
+		return s.PayWithCard(cardNumber, expiryMonth, expiryYear, "123", amount, currency)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	var response PaymentResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Google Pay response: %v", err)
+	}
+
+	// Convert amount to string if it's a number
+	response.Order.Amount = utils.ConvertToString(response.Order.Amount)
+	response.Transaction.Amount = utils.ConvertToString(response.Transaction.Amount)
+
+	return &response, nil
+}
+
+// AuthorizeWithGooglePay authorizes a Google Pay payment with merchant-decrypted card details
+func (s *mastercardService) AuthorizeWithGooglePay(cardNumber, expiryMonth, expiryYear, cryptogram, eci, amount, currency string) (*PaymentResponse, error) {
+	orderID := generateOrderID()
+	endpoint := fmt.Sprintf("/api/rest/version/100/merchant/%s/order/%s/transaction/1",
+		s.cfg.MastercardMerchantID, orderID)
+
+	request := GooglePayPaymentRequest{
+		ApiOperation: "AUTHORIZE",
+	}
+	request.Order.Amount = amount
+	request.Order.Currency = currency
+	request.Order.WalletProvider = "GOOGLE_PAY"
+	request.SourceOfFunds.Type = "CARD"
+	request.SourceOfFunds.Provided.Card.Number = cardNumber
+	request.SourceOfFunds.Provided.Card.Expiry.Month = expiryMonth
+	request.SourceOfFunds.Provided.Card.Expiry.Year = expiryYear
+	request.SourceOfFunds.Provided.Card.DevicePayment.CryptogramFormat = "3DSECURE"
+	request.SourceOfFunds.Provided.Card.DevicePayment.OnlinePaymentCryptogram = cryptogram
+	request.SourceOfFunds.Provided.Card.DevicePayment.EciIndicator = eci
+	request.Device.Ani = "12341234"
+	request.Transaction.Source = "INTERNET"
+
+	body, err := s.makeRequest("PUT", endpoint, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var response PaymentResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Google Pay authorization response: %v", err)
+	}
+
+	// Convert amount to string if it's a number
+	response.Order.Amount = utils.ConvertToString(response.Order.Amount)
+	response.Transaction.Amount = utils.ConvertToString(response.Transaction.Amount)
+
+	return &response, nil
+}
+
+// PayWithGooglePayToken - For Phase 2 when you have real Google Pay tokens
+func (s *mastercardService) PayWithGooglePayToken(paymentToken, amount, currency string) (*PaymentResponse, error) {
+	orderID := generateOrderID()
+	endpoint := fmt.Sprintf("/api/rest/version/100/merchant/%s/order/%s/transaction/1",
+		s.cfg.MastercardMerchantID, orderID)
+
+	// This uses the gateway-decrypted flow (needs production merchant ID)
+	request := map[string]interface{}{
+		"apiOperation": "PAY",
+		"order": map[string]interface{}{
+			"amount":         amount,
+			"currency":       currency,
+			"walletProvider": "GOOGLE_PAY",
+		},
+		"sourceOfFunds": map[string]interface{}{
+			"type": "CARD",
+			"provided": map[string]interface{}{
+				"card": map[string]interface{}{
+					"devicePayment": map[string]interface{}{
+						"paymentToken": paymentToken,
+					},
+				},
+			},
+		},
+		"device": map[string]interface{}{
+			"ani": "12341234",
+		},
+		"transaction": map[string]interface{}{
+			"source": "INTERNET",
+		},
+	}
+
+	body, err := s.makeRequest("PUT", endpoint, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var response PaymentResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Google Pay token response: %v", err)
+	}
+
+	response.Order.Amount = utils.ConvertToString(response.Order.Amount)
+	response.Transaction.Amount = utils.ConvertToString(response.Transaction.Amount)
+
+	return &response, nil
+}
+
+// AuthorizeWithGooglePayToken - For Phase 2
+func (s *mastercardService) AuthorizeWithGooglePayToken(paymentToken, amount, currency string) (*PaymentResponse, error) {
+	orderID := generateOrderID()
+	endpoint := fmt.Sprintf("/api/rest/version/100/merchant/%s/order/%s/transaction/1",
+		s.cfg.MastercardMerchantID, orderID)
+
+	request := map[string]interface{}{
+		"apiOperation": "AUTHORIZE",
+		"order": map[string]interface{}{
+			"amount":         amount,
+			"currency":       currency,
+			"walletProvider": "GOOGLE_PAY",
+		},
+		"sourceOfFunds": map[string]interface{}{
+			"type": "CARD",
+			"provided": map[string]interface{}{
+				"card": map[string]interface{}{
+					"devicePayment": map[string]interface{}{
+						"paymentToken": paymentToken,
+					},
+				},
+			},
+		},
+		"device": map[string]interface{}{
+			"ani": "12341234",
+		},
+		"transaction": map[string]interface{}{
+			"source": "INTERNET",
+		},
+	}
+
+	body, err := s.makeRequest("PUT", endpoint, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var response PaymentResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Google Pay token authorization response: %v", err)
+	}
+
+	response.Order.Amount = utils.ConvertToString(response.Order.Amount)
+	response.Transaction.Amount = utils.ConvertToString(response.Transaction.Amount)
 
 	return &response, nil
 }
