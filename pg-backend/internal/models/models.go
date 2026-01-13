@@ -22,7 +22,14 @@ type Card struct {
 	ExpiryYear   int       `json:"expiry_year"`
 	Scheme       string    `json:"scheme"`
 	IsDefault    bool      `json:"is_default"`
-	CreatedAt    time.Time `json:"created_at"`
+
+	// NEW FIELDS for Google Pay:
+	PaymentMethodType string                 `json:"payment_method_type"`       // "card", "google_pay"
+	WalletProvider    string                 `json:"wallet_provider,omitempty"` // "GOOGLE_PAY"
+	DevicePaymentData map[string]interface{} `json:"device_payment_data,omitempty"`
+	GooglePayToken    string                 `json:"google_pay_token,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Transaction struct {
@@ -37,7 +44,13 @@ type Transaction struct {
 	Status               string         `json:"status"`
 	GatewayTransactionID string         `json:"gateway_transaction_id"`
 	Type                 string         `json:"type"` // "manual", "recurring", "authorization", "capture", "void", "refund"
-	CreatedAt            time.Time      `json:"created_at"`
+
+	// NEW FIELDS for Google Pay:
+	WalletProvider    string                 `json:"wallet_provider,omitempty"`     // "GOOGLE_PAY"
+	PaymentMethodType string                 `json:"payment_method_type,omitempty"` // "card", "google_pay"
+	DevicePaymentData map[string]interface{} `json:"device_payment_data,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Plan struct {
@@ -123,3 +136,30 @@ type BillingAttempt struct {
 	ProcessedAt          sql.NullTime         `json:"processed_at,omitempty"`
 	CreatedAt            time.Time            `json:"created_at"`
 }
+
+type GooglePayToken struct {
+	ID             uuid.UUID `json:"id"`
+	UserID         uuid.UUID `json:"user_id"`
+	GatewayToken   string    `json:"gateway_token"`
+	GooglePayToken string    `json:"google_pay_token"` // Original encrypted token
+	LastFour       string    `json:"last_four"`
+	ExpiryMonth    int       `json:"expiry_month"`
+	ExpiryYear     int       `json:"expiry_year"`
+	Scheme         string    `json:"scheme,omitempty"`
+	IsDefault      bool      `json:"is_default"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// Add to PaymentMethodType constants
+const (
+	PaymentMethodTypeCard      = "card"
+	PaymentMethodTypeGooglePay = "google_pay"
+	PaymentMethodTypeApplePay  = "apple_pay" // NEW
+)
+
+// Add to WalletProvider constants
+const (
+	WalletProviderGooglePay = "GOOGLE_PAY"
+	WalletProviderApplePay  = "APPLE_PAY" // NEW
+)
