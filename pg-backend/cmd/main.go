@@ -83,6 +83,14 @@ func main() {
 	subscriptionHandler := handlers.NewSubscriptionHandler(subscriptionService)
 	billingHandler := handlers.NewBillingHandler(billingService)
 
+	// NEW: Initialize Google Pay handler (NO separate repository/service needed)
+	googlePayHandler := handlers.NewGooglePayHandler(
+		mastercardService, // Uses the extended MastercardService
+		userRepo,
+		cardRepo, // Uses existing CardRepository (now handles Google Pay too)
+		transactionRepo,
+	)
+
 	// NEW: Initialize worker
 	workerManager := worker.NewWorkerManager()
 
@@ -161,6 +169,14 @@ func main() {
 		// NEW: Add worker endpoints
 		api.GET("/worker/status", workerHandler.GetWorkerStatus)
 		api.POST("/worker/restart", workerHandler.RestartWorkers)
+
+		// NEW: Google Pay endpoints
+		api.POST("/pay/google-pay", googlePayHandler.Pay)
+		api.POST("/pay/google-pay/test", googlePayHandler.TestGooglePay)
+		api.GET("/users/:user_id/google-pay-cards", googlePayHandler.GetUserGooglePayCards)
+		api.DELETE("/google-pay/cards", googlePayHandler.DeleteGooglePayCard)
+
+		api.POST("/pay/google-pay/simulate", googlePayHandler.SimulateGooglePay)
 	}
 
 	// Start server
