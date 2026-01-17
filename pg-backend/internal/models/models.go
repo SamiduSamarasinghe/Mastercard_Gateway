@@ -155,11 +155,11 @@ type GooglePayToken struct {
 const (
 	PaymentMethodTypeCard      = "card"
 	PaymentMethodTypeGooglePay = "google_pay"
-	PaymentMethodTypeApplePay  = "apple_pay" // NEW
+	PaymentMethodTypeApplePay  = "apple_pay"
 )
 
 // Add to WalletProvider constants
 const (
 	WalletProviderGooglePay = "GOOGLE_PAY"
-	WalletProviderApplePay  = "APPLE_PAY" // NEW
+	WalletProviderApplePay  = "APPLE_PAY" 
 )

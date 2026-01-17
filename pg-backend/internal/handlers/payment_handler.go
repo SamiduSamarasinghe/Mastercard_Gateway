@@ -347,21 +347,3 @@ func (h *PaymentHandler) GetTransactionByID(c *gin.Context) {
 	c.JSON(http.StatusOK, transaction)
 }
 
-// func convertToString(v interface{}) string {
-// 	switch val := v.(type) {
-// 	case string:
-// 		return val
-// 	case float64:
-// 		return strconv.FormatFloat(val, 'f', -1, 64)
-// 	case int:
-// 		return strconv.Itoa(val)
-// 	default:
-// 		return fmt.Sprintf("%v", val)
-// 	}
-// }
-
-// // Helper functions
-// func mustParseFloat(s string) float64 {
-// 	f, _ := strconv.ParseFloat(s, 64)
-// 	return f
-// }

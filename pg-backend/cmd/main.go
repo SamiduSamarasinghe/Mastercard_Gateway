@@ -117,6 +117,13 @@ func main() {
 	// Ensure worker stops gracefully on shutdown
 	defer workerManager.StopAll()
 
+	applePayHandler := handlers.NewApplePayHandler(
+		mastercardService,
+		userRepo,
+		cardRepo,
+		transactionRepo,
+	)
+
 	// Setup Gin router
 	router := gin.Default()
 
@@ -175,8 +182,13 @@ func main() {
 		api.POST("/pay/google-pay/test", googlePayHandler.TestGooglePay)
 		api.GET("/users/:user_id/google-pay-cards", googlePayHandler.GetUserGooglePayCards)
 		api.DELETE("/google-pay/cards", googlePayHandler.DeleteGooglePayCard)
-
 		api.POST("/pay/google-pay/simulate", googlePayHandler.SimulateGooglePay)
+
+		api.POST("/pay/apple-pay", applePayHandler.Pay)
+		api.POST("/pay/apple-pay/test", applePayHandler.TestApplePay)
+		api.GET("/users/:user_id/apple-pay-cards", applePayHandler.GetUserApplePayCards)
+		api.DELETE("/apple-pay/cards", applePayHandler.DeleteApplePayCard)
+
 	}
 
 	// Start server

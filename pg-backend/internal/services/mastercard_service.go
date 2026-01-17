@@ -60,6 +60,10 @@ type MastercardService interface {
 	// For future use with real Google Pay tokens (Phase 2)
 	PayWithGooglePayToken(paymentToken, amount, currency string) (*PaymentResponse, error)
 	AuthorizeWithGooglePayToken(paymentToken, amount, currency string) (*PaymentResponse, error)
+
+	// Apple Pay methods
+	PayWithApplePayToken(paymentToken, amount, currency string) (*PaymentResponse, error)
+	AuthorizeWithApplePayToken(paymentToken, amount, currency string) (*PaymentResponse, error)
 }
 
 // Add GooglePayPaymentRequest struct for the merchant-decrypted flow
@@ -754,6 +758,107 @@ func (s *mastercardService) AuthorizeWithGooglePayToken(paymentToken, amount, cu
 	err = json.Unmarshal(body, &response)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal Google Pay token authorization response: %v", err)
+	}
+
+	response.Order.Amount = utils.ConvertToString(response.Order.Amount)
+	response.Transaction.Amount = utils.ConvertToString(response.Transaction.Amount)
+
+	return &response, nil
+}
+
+func (s *mastercardService) PayWithApplePayToken(paymentToken, amount, currency string) (*PaymentResponse, error) {
+	orderID := generateOrderID()
+	endpoint := fmt.Sprintf("/api/rest/version/100/merchant/%s/order/%s/transaction/1",
+		s.cfg.MastercardMerchantID, orderID)
+
+	request := map[string]interface{}{
+		"apiOperation": "PAY",
+		"order": map[string]interface{}{
+			"amount":         amount,
+			"currency":       currency,
+			"walletProvider": "APPLE_PAY",
+		},
+		"sourceOfFunds": map[string]interface{}{
+			"type": "CARD",
+			"provided": map[string]interface{}{
+				"card": map[string]interface{}{
+					"devicePayment": map[string]interface{}{
+						"paymentToken": paymentToken,
+					},
+				},
+			},
+		},
+		"device": map[string]interface{}{
+			"ani": "12341234",
+		},
+		"transaction": map[string]interface{}{
+			"source": "INTERNET",
+		},
+	}
+
+	body, err := s.makeRequest("PUT", endpoint, request)
+	if err != nil {
+		// Check if it's a privilege error
+		if strings.Contains(err.Error(), "Missing merchant privilege") {
+			return nil, fmt.Errorf("Missing merchant privilege 'Device Payments'")
+		}
+		return nil, err
+	}
+
+	var response PaymentResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Apple Pay response: %v", err)
+	}
+
+	response.Order.Amount = utils.ConvertToString(response.Order.Amount)
+	response.Transaction.Amount = utils.ConvertToString(response.Transaction.Amount)
+
+	return &response, nil
+}
+
+func (s *mastercardService) AuthorizeWithApplePayToken(paymentToken, amount, currency string) (*PaymentResponse, error) {
+	orderID := generateOrderID()
+	endpoint := fmt.Sprintf("/api/rest/version/100/merchant/%s/order/%s/transaction/1",
+		s.cfg.MastercardMerchantID, orderID)
+
+	request := map[string]interface{}{
+		"apiOperation": "AUTHORIZE",
+		"order": map[string]interface{}{
+			"amount":         amount,
+			"currency":       currency,
+			"walletProvider": "APPLE_PAY",
+		},
+		"sourceOfFunds": map[string]interface{}{
+			"type": "CARD",
+			"provided": map[string]interface{}{
+				"card": map[string]interface{}{
+					"devicePayment": map[string]interface{}{
+						"paymentToken": paymentToken,
+					},
+				},
+			},
+		},
+		"device": map[string]interface{}{
+			"ani": "12341234",
+		},
+		"transaction": map[string]interface{}{
+			"source": "INTERNET",
+		},
+	}
+
+	body, err := s.makeRequest("PUT", endpoint, request)
+	if err != nil {
+		if strings.Contains(err.Error(), "Missing merchant privilege") {
+			return nil, fmt.Errorf("Missing merchant privilege 'Device Payments'")
+		}
+		return nil, err
+	}
+
+	var response PaymentResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Apple Pay authorization response: %v", err)
 	}
 
 	response.Order.Amount = utils.ConvertToString(response.Order.Amount)

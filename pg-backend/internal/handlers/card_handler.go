@@ -239,8 +239,3 @@ func (h *CardHandler) DeleteCard(c *gin.Context) {
 	})
 }
 
-// // Helper function to parse string to int
-// func mustParseInt(s string) int {
-// 	i, _ := strconv.Atoi(s)
-// 	return i
-// }
